@@ -1,5 +1,7 @@
 # 📈 Elasticidad Precio-Demanda en Power BI con Vega
 
+![Elasticidad Precio-Demanda](https://sentidoanalitica.com/wp-content/uploads/2026/06/elasticidad-precio-demanda-v1.gif)
+
 ## 📌 Descripción
 
 Este proyecto implementa un objeto visual personalizado en **Power BI** utilizando **Deneb (Vega)** para analizar la **elasticidad precio-demanda** de productos.
