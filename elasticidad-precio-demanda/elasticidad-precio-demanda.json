@@ -46,7 +46,7 @@
   "description": "Elasticidad Precio-Demanda Scatter base. Usa Fecha, SKU, Producto, Categoria, Precio_Unitario, Unidades_Vendidas e Ingresos.",
   "bounds": "flush",
   "autosize": { "type": "fit", "contains": "padding", "resize": true },
-  "padding": { "top": 20, "right": 78, "bottom": 56, "left": 78 },
+  "padding": { "top": 20, "right": 28, "bottom": 56, "left": 28 },
   "width": { "signal": "viewW" },
   "height": { "signal": "viewH" },
   "background": "white",
@@ -197,12 +197,72 @@
       ]
     },
     {
+      "name": "product_trace_points",
+      "source": "dataset",
+      "transform": [
+        { "type": "filter", "expr": "activeProductCount === 1" },
+        {
+          "type": "window",
+          "sort": { "field": ["fecha_val", "ingresos"], "order": ["ascending", "ascending"] },
+          "ops": ["row_number"],
+          "as": ["trace_step"]
+        },
+        { "type": "formula", "as": "trace_x", "expr": "datum.delta_precio_pct" },
+        { "type": "formula", "as": "trace_y", "expr": "datum.delta_demanda_pct" },
+        { "type": "formula", "as": "trace_xy", "expr": "datum.trace_x * datum.trace_y" },
+        { "type": "formula", "as": "trace_x2", "expr": "datum.trace_x * datum.trace_x" }
+      ]
+    },
+    {
+      "name": "product_trend_stats",
+      "source": "product_trace_points",
+      "transform": [
+        {
+          "type": "aggregate",
+          "fields": [null, "trace_x", "trace_y", "trace_xy", "trace_x2"],
+          "ops": ["count", "sum", "sum", "sum", "sum"],
+          "as": ["n", "sum_x", "sum_y", "sum_xy", "sum_x2"]
+        }
+      ]
+    },
+    {
+      "name": "product_trend_extent",
+      "source": "product_trace_points",
+      "transform": [
+        {
+          "type": "aggregate",
+          "fields": ["delta_precio_pct", "delta_precio_pct"],
+          "ops": ["min", "max"],
+          "as": ["x_min", "x_max"]
+        }
+      ]
+    },
+    {
+      "name": "product_trend_line",
+      "values": [
+        { "p": 0 },
+        { "p": 1 }
+      ]
+    },
+    {
+      "name": "active_quadrants",
+      "source": "dataset",
+      "transform": [
+        {
+          "type": "formula",
+          "as": "quadrant",
+          "expr": "datum.delta_precio_pct < 0 && datum.delta_demanda_pct >= 0 ? 'topLeft' : datum.delta_precio_pct >= 0 && datum.delta_demanda_pct >= 0 ? 'topRight' : datum.delta_precio_pct < 0 && datum.delta_demanda_pct < 0 ? 'bottomLeft' : 'bottomRight'"
+        },
+        { "type": "aggregate", "groupby": ["quadrant"] }
+      ]
+    },
+    {
       "name": "quadrant_labels",
       "values": [
-        { "label": "Riesgo de volumen", "subLabel": "Precio sube y la demanda se contrae", "x": 0.75, "y": 0.80 },
-        { "label": "Impulso promocional", "subLabel": "Precio baja y la demanda responde", "x": 0.20, "y": 0.16 },
-        { "label": "Deterioro mixto", "subLabel": "Ni precio ni demanda sostienen el resultado", "x": 0.20, "y": 0.80 },
-        { "label": "Captura de valor", "subLabel": "Precio sube con demanda resiliente", "x": 0.75, "y": 0.16 }
+        { "quadrant": "bottomRight", "label": "Riesgo de volumen", "subLabel": "Precio sube y la demanda se contrae" },
+        { "quadrant": "topLeft", "label": "Impulso promocional", "subLabel": "Precio baja y la demanda responde" },
+        { "quadrant": "bottomLeft", "label": "Deterioro mixto", "subLabel": "Ni precio ni demanda sostienen el resultado" },
+        { "quadrant": "topRight", "label": "Captura de valor", "subLabel": "Precio sube con demanda resiliente" }
       ]
     },
     {
@@ -248,9 +308,45 @@
     { "name": "activeCategoryCount", "update": "data('active_categories').length" },
     { "name": "activeProductCount", "update": "data('active_products').length" },
     { "name": "showFocusedLatestPoint", "update": "activeCategoryCount == 1 || activeProductCount == 1" },
+    { "name": "showProductTrace", "update": "activeProductCount === 1 && data('product_trace_points').length > 1" },
+    { "name": "trendPointCount", "update": "data('product_trend_stats').length ? data('product_trend_stats')[0].n : 0" },
+    { "name": "trendDenominator", "update": "data('product_trend_stats').length ? data('product_trend_stats')[0].n * data('product_trend_stats')[0].sum_x2 - data('product_trend_stats')[0].sum_x * data('product_trend_stats')[0].sum_x : 0" },
+    { "name": "trendSlope", "update": "data('product_trend_stats').length && abs(trendDenominator) > 1e-9 ? (data('product_trend_stats')[0].n * data('product_trend_stats')[0].sum_xy - data('product_trend_stats')[0].sum_x * data('product_trend_stats')[0].sum_y) / trendDenominator : 0" },
+    { "name": "trendIntercept", "update": "data('product_trend_stats').length && data('product_trend_stats')[0].n > 0 ? (data('product_trend_stats')[0].sum_y - trendSlope * data('product_trend_stats')[0].sum_x) / data('product_trend_stats')[0].n : 0" },
+    { "name": "trendXStart", "update": "data('product_trend_extent').length ? data('product_trend_extent')[0].x_min : 0" },
+    { "name": "trendXEnd", "update": "data('product_trend_extent').length ? data('product_trend_extent')[0].x_max : 0" },
+    { "name": "showProductTrend", "update": "activeProductCount === 1 && trendPointCount >= 4 && abs(trendDenominator) > 1e-9 && trendXStart != trendXEnd" },
     {
       "name": "contextLabel",
       "update": "activeProductCount === 1 ? 'Vista: ' + data('active_products')[0].producto + ' | ' + data('active_products')[0].categoria : activeCategoryCount === 1 ? 'Vista: ' + data('active_categories')[0].categoria + ' | ' + format(activeProductCount, ',.0f') + ' productos' : 'Vista: ' + format(activeCategoryCount, ',.0f') + ' categorias | ' + format(activeProductCount, ',.0f') + ' productos'"
+    },
+    {
+      "name": "hoveredPointQuadrant",
+      "value": null,
+      "on": [
+        {
+          "events": "@scatter-points:mouseover",
+          "update": "datum.delta_precio_pct < 0 && datum.delta_demanda_pct >= 0 ? 'topLeft' : datum.delta_precio_pct >= 0 && datum.delta_demanda_pct >= 0 ? 'topRight' : datum.delta_precio_pct < 0 && datum.delta_demanda_pct < 0 ? 'bottomLeft' : 'bottomRight'"
+        },
+        {
+          "events": "@scatter-points:mouseout",
+          "update": "null"
+        }
+      ]
+    },
+    {
+      "name": "hoveredPoint",
+      "value": null,
+      "on": [
+        {
+          "events": "@scatter-points:mouseover",
+          "update": "datum"
+        },
+        {
+          "events": "@scatter-points:mouseout",
+          "update": "null"
+        }
+      ]
     }
   ],
   "scales": [
@@ -603,7 +699,7 @@
           "y": { "value": 0 },
           "y2": { "scale": "y", "value": 0 },
           "fill": { "value": "#e7f0fb" },
-          "fillOpacity": { "value": 0.32 }
+          "fillOpacity": { "signal":"hoveredPointQuadrant === null ? 0.34 : hoveredPointQuadrant === 'topLeft' ? 0.57 : 0.2" }
         }
       }
     },
@@ -615,8 +711,8 @@
           "x2": { "signal": "width" },
           "y": { "value": 0 },
           "y2": { "scale": "y", "value": 0 },
-          "fill": { "value": "#fae8ea" },
-          "fillOpacity": { "value": 0.29 }
+          "fill": { "value": "#f9ead8" },
+          "fillOpacity": { "signal":"hoveredPointQuadrant === null ? 0.31 : hoveredPointQuadrant === 'topRight' ? 0.54 : 0.19" }
         }
       }
     },
@@ -628,8 +724,8 @@
           "x2": { "scale": "x", "value": 0 },
           "y": { "scale": "y", "value": 0 },
           "y2": { "signal": "height" },
-          "fill": { "value": "#f7ecd7" },
-          "fillOpacity": { "value": 0.29 }
+          "fill": { "value": "#efe1f7" },
+          "fillOpacity": { "signal":"hoveredPointQuadrant === null ? 0.31 : hoveredPointQuadrant === 'bottomLeft' ? 0.54 : 0.19" }
         }
       }
     },
@@ -641,8 +737,72 @@
           "x2": { "signal": "width" },
           "y": { "scale": "y", "value": 0 },
           "y2": { "signal": "height" },
-          "fill": { "value": "#eee5cf" },
-          "fillOpacity": { "value": 0.25 }
+          "fill": { "value": "#fae1e5" },
+          "fillOpacity": { "signal":"hoveredPointQuadrant === null ? 0.29 : hoveredPointQuadrant === 'bottomRight' ? 0.5 : 0.17" }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "interactive": false,
+      "encode": {
+        "update": {
+          "x": { "value": 0 },
+          "x2": { "scale": "x", "value": 0 },
+          "y": { "value": 0 },
+          "y2": { "scale": "y", "value": 0 },
+          "fill": { "value": "transparent" },
+          "stroke": { "value": "#3f6f95" },
+          "strokeWidth": { "value": 1.25 },
+          "strokeOpacity": { "signal": "hoveredPointQuadrant === 'topLeft' ? 0.58 : 0" }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "interactive": false,
+      "encode": {
+        "update": {
+          "x": { "scale": "x", "value": 0 },
+          "x2": { "signal": "width" },
+          "y": { "value": 0 },
+          "y2": { "scale": "y", "value": 0 },
+          "fill": { "value": "transparent" },
+          "stroke": { "value": "#b87235" },
+          "strokeWidth": { "value": 1.25 },
+          "strokeOpacity": { "signal": "hoveredPointQuadrant === 'topRight' ? 0.56 : 0" }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "interactive": false,
+      "encode": {
+        "update": {
+          "x": { "value": 0 },
+          "x2": { "scale": "x", "value": 0 },
+          "y": { "scale": "y", "value": 0 },
+          "y2": { "signal": "height" },
+          "fill": { "value": "transparent" },
+          "stroke": { "value": "#764695" },
+          "strokeWidth": { "value": 1.25 },
+          "strokeOpacity": { "signal": "hoveredPointQuadrant === 'bottomLeft' ? 0.62 : 0" }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "interactive": false,
+      "encode": {
+        "update": {
+          "x": { "scale": "x", "value": 0 },
+          "x2": { "signal": "width" },
+          "y": { "scale": "y", "value": 0 },
+          "y2": { "signal": "height" },
+          "fill": { "value": "transparent" },
+          "stroke": { "value": "#a93f4b" },
+          "strokeWidth": { "value": 1.25 },
+          "strokeOpacity": { "signal": "hoveredPointQuadrant === 'bottomRight' ? 0.58 : 0" }
         }
       }
     },
@@ -763,14 +923,15 @@
       "from": { "data": "quadrant_labels" },
       "encode": {
         "update": {
-          "x": { "signal": "datum.x * width" },
-          "y": { "signal": "datum.y * height" },
+          "x": { "signal": "datum.quadrant === 'topLeft' || datum.quadrant === 'bottomLeft' ? scale('x', 0) * 0.5 : scale('x', 0) + (width - scale('x', 0)) * 0.5" },
+          "y": { "signal": "datum.quadrant === 'topLeft' || datum.quadrant === 'topRight' ? scale('y', 0) * 0.5 : scale('y', 0) + (height - scale('y', 0)) * 0.5" },
           "text": { "field": "label" },
           "font": { "value": "Bahnschrift SemiBold" },
           "fontSize": { "value": 11 },
           "fill": { "value": "#98a2b3" },
           "align": { "value": "center" },
-          "baseline": { "value": "middle" }
+          "baseline": { "value": "middle" },
+          "opacity": { "signal": "indata('active_quadrants', 'quadrant', datum.quadrant) ? 1 : 0" }
         }
       }
     },
@@ -779,14 +940,65 @@
       "from": { "data": "quadrant_labels" },
       "encode": {
         "update": {
-          "x": { "signal": "datum.x * width" },
-          "y": { "signal": "datum.y * height + 16" },
+          "x": { "signal": "datum.quadrant === 'topLeft' || datum.quadrant === 'bottomLeft' ? scale('x', 0) * 0.5 : scale('x', 0) + (width - scale('x', 0)) * 0.5" },
+          "y": { "signal": "(datum.quadrant === 'topLeft' || datum.quadrant === 'topRight' ? scale('y', 0) * 0.5 : scale('y', 0) + (height - scale('y', 0)) * 0.5) + 16" },
           "text": { "field": "subLabel" },
           "font": { "value": "Bahnschrift" },
           "fontSize": { "value": 9 },
           "fill": { "value": "#b0b8c7" },
           "align": { "value": "center" },
-          "baseline": { "value": "top" }
+          "baseline": { "value": "top" },
+          "opacity": { "signal": "indata('active_quadrants', 'quadrant', datum.quadrant) ? 1 : 0" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "interactive": false,
+      "encode": {
+        "update": {
+          "x": { "signal": "hoveredPointQuadrant === 'topLeft' || hoveredPointQuadrant === 'bottomLeft' ? scale('x', 0) * 0.5 : scale('x', 0) + (width - scale('x', 0)) * 0.5" },
+          "y": { "signal": "hoveredPointQuadrant === 'bottomLeft' || hoveredPointQuadrant === 'bottomRight' ? scale('y', 0) + 18 : 18" },
+          "text": { "signal": "hoveredPoint ? (hoveredPointQuadrant === 'topLeft' ? 'Impulso promocional' : hoveredPointQuadrant === 'topRight' ? 'Captura de valor' : hoveredPointQuadrant === 'bottomLeft' ? 'Deterioro mixto' : 'Riesgo de volumen') + ' | Var. Precio: ' + format(hoveredPoint.delta_precio_pct, '+.1%') + ' | Var. Demanda: ' + format(hoveredPoint.delta_demanda_pct, '+.1%') : ''" },
+          "font": { "value": "Bahnschrift SemiBold" },
+          "fontSize": { "value": 10.5 },
+          "fill": { "signal": "hoveredPointQuadrant === 'topLeft' ? '#3f6f95' : hoveredPointQuadrant === 'topRight' ? '#b87235' : hoveredPointQuadrant === 'bottomLeft' ? '#764695' : '#a93f4b'" },
+          "align": { "value": "center" },
+          "baseline": { "value": "top" },
+          "opacity": { "signal": "hoveredPoint ? 1 : 0" }
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": { "data": "product_trace_points" },
+      "sort": { "field": "fecha_val", "order": "ascending" },
+      "interactive": false,
+      "encode": {
+        "update": {
+          "x": { "scale": "x", "field": "delta_precio_pct" },
+          "y": { "scale": "y", "field": "delta_demanda_pct" },
+          "stroke": { "value": "#475467" },
+          "strokeWidth": { "value": 1.4 },
+          "interpolate": { "value": "cardinal" },
+          "tension": { "value": 0.35 },
+          "strokeOpacity": { "signal": "showProductTrace ? 0.42 : 0" }
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": { "data": "product_trend_line" },
+      "sort": { "field": "p", "order": "ascending" },
+      "interactive": false,
+      "encode": {
+        "update": {
+          "x": { "signal": "datum.p === 0 ? scale('x', trendXStart) : scale('x', trendXEnd)" },
+          "y": { "signal": "datum.p === 0 ? scale('y', trendIntercept + trendSlope * trendXStart) : scale('y', trendIntercept + trendSlope * trendXEnd)" },
+          "stroke": { "value": "#667085" },
+          "strokeWidth": { "value": 1.05 },
+          "strokeDash": { "value": [4, 5] },
+          "strokeOpacity": { "signal": "showProductTrend ? 0.4 : 0" }
         }
       }
     },
@@ -808,7 +1020,7 @@
           "strokeWidth": { "value": 1.4 },
           "opacity": { "value": 0.78 },
           "tooltip": {
-            "signal": "{Periodo: datum.periodo, SKU: datum.sku_key, Producto: datum.producto, Categoria: datum.categoria, Clasificacion: datum.clasificacion, Elasticidad: isValid(datum.elasticidad_arco) ? format(datum.elasticidad_arco, '.2f') : 'n/a', 'Var. precio': format(datum.delta_precio_pct, '+.1%'), 'Var. demanda': format(datum.delta_demanda_pct, '+.1%'), 'Var. ingresos': isValid(datum.delta_ingresos_pct) ? format(datum.delta_ingresos_pct, '+.1%') : 'n/a', Ingresos: format(datum.ingresos, ',.2f')}"
+            "signal": "activeProductCount === 1 ? {Periodo: datum.periodo, Clasificacion: datum.clasificacion, Elasticidad: isValid(datum.elasticidad_arco) ? format(datum.elasticidad_arco, '.2f') : 'n/a', 'Var. precio': format(datum.delta_precio_pct, '+.1%'), 'Var. demanda': format(datum.delta_demanda_pct, '+.1%'), 'Var. ingresos': isValid(datum.delta_ingresos_pct) ? format(datum.delta_ingresos_pct, '+.1%') : 'n/a'} : activeCategoryCount === 1 ? {Periodo: datum.periodo, SKU: datum.sku_key, Producto: datum.producto, Clasificacion: datum.clasificacion, Elasticidad: isValid(datum.elasticidad_arco) ? format(datum.elasticidad_arco, '.2f') : 'n/a', 'Var. precio': format(datum.delta_precio_pct, '+.1%'), 'Var. demanda': format(datum.delta_demanda_pct, '+.1%'), 'Var. ingresos': isValid(datum.delta_ingresos_pct) ? format(datum.delta_ingresos_pct, '+.1%') : 'n/a'} : {Periodo: datum.periodo, SKU: datum.sku_key, Producto: datum.producto, Categoria: datum.categoria, Clasificacion: datum.clasificacion, Elasticidad: isValid(datum.elasticidad_arco) ? format(datum.elasticidad_arco, '.2f') : 'n/a', 'Var. precio': format(datum.delta_precio_pct, '+.1%'), 'Var. demanda': format(datum.delta_demanda_pct, '+.1%'), 'Var. ingresos': isValid(datum.delta_ingresos_pct) ? format(datum.delta_ingresos_pct, '+.1%') : 'n/a', Ingresos: format(datum.ingresos, ',.2f')}"
           }
         },
         "hover": {
@@ -832,6 +1044,41 @@
           "stroke": { "signal": "datum.clasificacion === 'Elastica' ? scale('strokeColor', datum.clasificacion) : datum.clasificacion === 'Anomala' ? scale('strokeColor', datum.clasificacion) : 'transparent'" },
           "strokeWidth": { "signal": "datum.clasificacion === 'Elastica' || datum.clasificacion === 'Anomala' ? 0.8 : 0" },
           "opacity": { "value": 0.95 }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": { "data": "product_trace_points" },
+      "interactive": false,
+      "encode": {
+        "update": {
+          "x": { "signal": "scale('x', datum.delta_precio_pct) + 12" },
+          "y": { "signal": "scale('y', datum.delta_demanda_pct) - 12" },
+          "shape": { "value": "circle" },
+          "size": { "value": 180 },
+          "fill": { "value": "white" },
+          "stroke": { "value": "#98a2b3" },
+          "strokeWidth": { "value": 1 },
+          "opacity": { "signal": "activeProductCount === 1 ? 0.96 : 0" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "product_trace_points" },
+      "interactive": false,
+      "encode": {
+        "update": {
+          "x": { "signal": "scale('x', datum.delta_precio_pct) + 12" },
+          "y": { "signal": "scale('y', datum.delta_demanda_pct) - 12" },
+          "text": { "signal": "toString(datum.trace_step)" },
+          "font": { "value": "Bahnschrift SemiBold" },
+          "fontSize": { "value": 8.5 },
+          "fill": { "value": "#344054" },
+          "align": { "value": "center" },
+          "baseline": { "value": "middle" },
+          "opacity": { "signal": "activeProductCount === 1 ? 1 : 0" }
         }
       }
     },
