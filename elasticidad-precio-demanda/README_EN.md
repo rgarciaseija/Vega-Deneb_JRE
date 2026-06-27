@@ -1,4 +1,4 @@
-# Price Elasticity Scatter – Vega Spec for Deneb
+# Price Elasticity of Demand – Vega Spec for Deneb
 
 ![Elasticidad Precio-Demanda](https://sentidoanalitica.com/wp-content/uploads/2026/06/elasticidad-precio-demanda-v2.gif)
 
